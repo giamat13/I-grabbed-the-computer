@@ -35,7 +35,9 @@ class SplashScreen:
         self.root.attributes("-fullscreen", True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#0d1117")
-        # מסך טעינה – Alt+F4 מותר (לא overrideredirect)
+        # Alt+F4 מפורש — חייב ב-EXE כי fullscreen בולע את ברירת המחדל
+        self.root.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
+        self.root.bind_all("<Alt-F4>", lambda e: sys.exit())
 
         self._done = False
         self._console_visible = False
@@ -125,6 +127,13 @@ class SplashScreen:
         sys.stderr = self
 
     def write(self, msg):
+        # חייב לעבור דרך after — tkinter לא thread-safe!
+        try:
+            self.root.after(0, self._write_safe, msg)
+        except Exception:
+            pass
+
+    def _write_safe(self, msg):
         try:
             self.console_text.configure(state="normal")
             self.console_text.insert("end", msg)
@@ -176,10 +185,20 @@ class SplashScreen:
             else:
                 print(f"📦 מתקין {pkg}...\n")
                 self.root.after(0, lambda s=1+i: self._set_progress((1+i)/steps_count, s))
+                # ב-EXE מקומפל sys.executable הוא ה-EXE עצמו — חייב למצוא python אמיתי
+                import shutil
+                if getattr(sys, "frozen", False):
+                    py = shutil.which("python") or shutil.which("python3") or shutil.which("py")
+                    if not py:
+                        print(f"✗ לא נמצא Python — לא ניתן להתקין {pkg}\n")
+                        continue
+                else:
+                    py = sys.executable
                 proc = subprocess.Popen(
-                    [sys.executable, "-m", "pip", "install", pkg],
+                    [py, "-m", "pip", "install", pkg],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                 )
                 for line in proc.stdout:
                     print(line, end="")
